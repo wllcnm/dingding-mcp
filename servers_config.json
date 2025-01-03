@@ -1,0 +1,6 @@
+{
+    "dingding_mcp_server": {
+        "command": ["python", "src/server.py"],
+        "cwd": "."
+    }
+} 
