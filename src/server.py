@@ -8,9 +8,9 @@ from mcp.server import Server
 from mcp.types import Tool, TextContent
 from mcp.server.stdio import stdio_server
 
-# 日志配置
+# 设置日志级别为 DEBUG，显示更多信息
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # 改为 DEBUG 级别
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("dingding_mcp_server")
@@ -24,20 +24,26 @@ class DingTalkAPIError(Exception):
 
 class DingdingMCPServer:
     def __init__(self):
+        logger.debug("Initializing DingdingMCPServer...")
         self.base_url = "https://oapi.dingtalk.com"
         self.access_token = None
         self._session = requests.Session()
         self.app = Server("dingding-mcp")
+        logger.debug("Created MCP Server instance with name: dingding-mcp")
         self.setup_tools()
+        logger.debug("Server initialization completed")
 
     def _make_request(self, url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """发送 HTTP 请求并处理通用错误"""
+        logger.debug(f"Making request to URL: {url} with params: {params}")
         try:
             response = self._session.get(url, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
+            logger.debug(f"Response received: {data}")
             
             if data.get("errcode", 0) != 0:
+                logger.error(f"DingTalk API error: {data}")
                 raise DingTalkAPIError(
                     "DingTalk API error",
                     data.get("errcode", -1),
@@ -46,19 +52,23 @@ class DingdingMCPServer:
             
             return data
         except requests.RequestException as e:
-            logger.error(f"HTTP request failed: {str(e)}")
+            logger.error(f"HTTP request failed: {str(e)}", exc_info=True)
             raise DingTalkAPIError("HTTP request failed", -1, str(e))
         except ValueError as e:
-            logger.error(f"Invalid JSON response: {str(e)}")
+            logger.error(f"Invalid JSON response: {str(e)}", exc_info=True)
             raise DingTalkAPIError("Invalid JSON response", -1, str(e))
 
     def get_access_token(self) -> str:
         """获取钉钉access token"""
+        logger.debug("Attempting to get access token...")
         try:
             appkey = os.environ.get("DINGDING_APP_KEY")
             appsecret = os.environ.get("DINGDING_APP_SECRET")
             
+            logger.debug(f"Using APP_KEY: {appkey[:4]}*** and APP_SECRET: {appsecret[:4]}***")
+            
             if not all([appkey, appsecret]):
+                logger.error("Missing DingTalk API credentials in environment variables")
                 raise ValueError("Missing DingTalk API credentials in environment variables")
             
             url = f"{self.base_url}/gettoken"
@@ -67,10 +77,12 @@ class DingdingMCPServer:
                 "appsecret": appsecret
             })
             
-            return data["access_token"]
+            token = data["access_token"]
+            logger.debug(f"Successfully obtained access token: {token[:4]}***")
+            return token
             
         except Exception as e:
-            logger.error(f"Failed to get access token: {str(e)}")
+            logger.error(f"Failed to get access token: {str(e)}", exc_info=True)
             raise
 
     def get_department_list(self, fetch_child: bool = True) -> str:
@@ -202,9 +214,12 @@ class DingdingMCPServer:
             return f"Error: {str(e)}"
 
     def setup_tools(self):
+        logger.debug("Setting up MCP tools...")
+        
         @self.app.list_tools()
         async def list_tools() -> List[Tool]:
-            return [
+            logger.debug("list_tools called")
+            tools = [
                 Tool(
                     name="get_access_token",
                     description="Retrieves an access token from the DingTalk API for authentication purposes.",
@@ -237,7 +252,7 @@ class DingdingMCPServer:
                         "properties": {
                             "department_id": {
                                 "type": "integer",
-                                "description": "The ID of the department to query. Must be a valid department ID from get_department_list."
+                                "description": "The ID of the department to query."
                             }
                         },
                         "required": ["department_id"]
@@ -251,41 +266,52 @@ class DingdingMCPServer:
                         "properties": {
                             "name": {
                                 "type": "string",
-                                "description": "The exact name of the user to search for. Must match the user's name in DingTalk exactly."
+                                "description": "The exact name of the user to search for."
                             }
                         },
                         "required": ["name"]
                     }
                 )
             ]
+            logger.debug(f"Returning {len(tools)} tools")
+            return tools
 
         @self.app.call_tool()
         async def call_tool(name: str, arguments: dict) -> List[TextContent]:
+            logger.debug(f"Tool called: {name} with arguments: {arguments}")
             try:
+                result = None
                 if name == "get_access_token":
                     token = self.get_access_token()
-                    return [TextContent(type="text", text=f"Access Token: {token}")]
+                    result = [TextContent(type="text", text=f"Access Token: {token}")]
                 
                 elif name == "get_department_list":
                     fetch_child = arguments.get("fetch_child", True)
+                    logger.debug(f"Fetching department list with fetch_child={fetch_child}")
                     result = self.get_department_list(fetch_child)
-                    return [TextContent(type="text", text=result)]
+                    result = [TextContent(type="text", text=result)]
                 
                 elif name == "get_department_users":
                     department_id = arguments["department_id"]
+                    logger.debug(f"Fetching users for department ID: {department_id}")
                     result = self.get_department_users(department_id)
-                    return [TextContent(type="text", text=result)]
+                    result = [TextContent(type="text", text=result)]
                 
                 elif name == "search_user_by_name":
                     name = arguments["name"]
+                    logger.debug(f"Searching for user with name: {name}")
                     result = self.search_user_by_name(name)
-                    return [TextContent(type="text", text=result)]
+                    result = [TextContent(type="text", text=result)]
                 
                 else:
-                    return [TextContent(type="text", text=f"Unknown tool: {name}")]
+                    logger.warning(f"Unknown tool called: {name}")
+                    result = [TextContent(type="text", text=f"Unknown tool: {name}")]
+                
+                logger.debug(f"Tool {name} completed with result: {result}")
+                return result
                     
             except Exception as e:
-                logger.error(f"Error executing tool {name}: {str(e)}")
+                logger.error(f"Error executing tool {name}: {str(e)}", exc_info=True)
                 return [TextContent(type="text", text=f"Error: {str(e)}")]
 
     async def run(self):
@@ -294,6 +320,7 @@ class DingdingMCPServer:
         async with stdio_server() as (read_stream, write_stream):
             logger.info("stdio server started")
             try:
+                logger.debug("Initializing server with streams")
                 await self.app.run(
                     read_stream,
                     write_stream,
@@ -302,10 +329,20 @@ class DingdingMCPServer:
             except Exception as e:
                 logger.error(f"Server error: {str(e)}", exc_info=True)
                 raise
+            finally:
+                logger.debug("Server run completed")
 
 def main():
-    server = DingdingMCPServer()
-    asyncio.run(server.run())
+    logger.info("Main function started")
+    try:
+        server = DingdingMCPServer()
+        logger.debug("Server instance created")
+        asyncio.run(server.run())
+    except Exception as e:
+        logger.error(f"Main function error: {str(e)}", exc_info=True)
+        sys.exit(1)
+    finally:
+        logger.info("Main function completed")
 
 if __name__ == "__main__":
     main() 
