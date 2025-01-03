@@ -207,10 +207,7 @@ class DingdingMCPServer:
             return [
                 Tool(
                     name="get_access_token",
-                    description="""Retrieves an access token from the DingTalk API for authentication purposes.
-                    Use this tool when you need to manually obtain an access token for testing or debugging.
-                    Note: Most other tools automatically handle token management, so you rarely need to call this directly.
-                    Returns: A valid access token string if successful, or an error message if failed.""",
+                    description="Retrieves an access token from the DingTalk API for authentication purposes.",
                     inputSchema={
                         "type": "object",
                         "properties": {},
@@ -219,14 +216,7 @@ class DingdingMCPServer:
                 ),
                 Tool(
                     name="get_department_list",
-                    description="""Retrieves a list of all departments in the organization.
-                    Use this tool when you need to:
-                    - Get an overview of the organization structure
-                    - Find department IDs for other API calls
-                    - Check the hierarchy of departments
-                    - Verify if a specific department exists
-                    The response includes department IDs, names, and parent department IDs.
-                    Set fetch_child=false if you only need top-level departments.""",
+                    description="Retrieves a list of all departments in the organization.",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -241,14 +231,7 @@ class DingdingMCPServer:
                 ),
                 Tool(
                     name="get_department_users",
-                    description="""Retrieves a list of users in a specific department.
-                    Use this tool when you need to:
-                    - Get all members of a particular department
-                    - Check if a user belongs to a department
-                    - Find user IDs within a department
-                    - List available users for task assignment
-                    Requires a valid department ID (can be obtained from get_department_list).
-                    Returns basic user information including user ID and name.""",
+                    description="Retrieves a list of users in a specific department.",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -262,18 +245,7 @@ class DingdingMCPServer:
                 ),
                 Tool(
                     name="search_user_by_name",
-                    description="""Searches for a user across all departments by their name.
-                    Use this tool when you need to:
-                    - Find detailed information about a specific user
-                    - Verify if a user exists in the organization
-                    - Get contact information for a user
-                    - Check which department a user belongs to
-                    This tool will search through all departments to find the user.
-                    Returns comprehensive user details including:
-                    - User ID and name
-                    - Contact information (mobile and email)
-                    - Position and department
-                    Note: This operation may take longer as it searches through all departments.""",
+                    description="Searches for a user across all departments by their name.",
                     inputSchema={
                         "type": "object",
                         "properties": {
