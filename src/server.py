@@ -328,7 +328,7 @@ class DingdingMCPServer:
                     self.app.create_initialization_options()
                 )
             except Exception as e:
-                logger.error(f"Server run error: {str(e)}", exc_info=True)
+                logger.error(f"Server error: {str(e)}", exc_info=True)
                 raise
 
 def main():
@@ -336,8 +336,4 @@ def main():
     asyncio.run(server.run())
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except Exception as e:
-        logger.error(f"Main execution error: {str(e)}", exc_info=True)
-        sys.exit(1) 
+    main() 
