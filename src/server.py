@@ -2,9 +2,10 @@ import asyncio
 import logging
 import os
 import sys
-from typing import List
+from typing import List, Optional, Dict, Any
 import requests
-from mcp import Server, Tool, TextContent
+from mcp.server import Server
+from mcp.types import Tool, TextContent
 from mcp.server.stdio import stdio_server
 
 # 日志配置
@@ -14,60 +15,85 @@ logging.basicConfig(
 )
 logger = logging.getLogger("dingding_mcp_server")
 
+class DingTalkAPIError(Exception):
+    """钉钉 API 错误"""
+    def __init__(self, message: str, error_code: int, error_msg: str):
+        self.error_code = error_code
+        self.error_msg = error_msg
+        super().__init__(f"{message}: {error_msg} (code: {error_code})")
+
 class DingdingMCPServer:
     def __init__(self):
         self.base_url = "https://oapi.dingtalk.com"
         self.access_token = None
+        self._session = requests.Session()
 
-    def get_access_token(self):
+    def _make_request(self, url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """发送 HTTP 请求并处理通用错误"""
+        try:
+            response = self._session.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data.get("errcode", 0) != 0:
+                raise DingTalkAPIError(
+                    "DingTalk API error",
+                    data.get("errcode", -1),
+                    data.get("errmsg", "Unknown error")
+                )
+            
+            return data
+        except requests.RequestException as e:
+            logger.error(f"HTTP request failed: {str(e)}")
+            raise DingTalkAPIError("HTTP request failed", -1, str(e))
+        except ValueError as e:
+            logger.error(f"Invalid JSON response: {str(e)}")
+            raise DingTalkAPIError("Invalid JSON response", -1, str(e))
+
+    def get_access_token(self) -> str:
         """获取钉钉access token"""
-        appkey = os.environ.get("DINGDING_APP_KEY")
-        appsecret = os.environ.get("DINGDING_APP_SECRET")
-        
-        if not all([appkey, appsecret]):
-            raise ValueError("Missing Dingding API credentials in environment variables")
-        
-        url = f"{self.base_url}/gettoken"
-        params = {
-            "appkey": appkey,
-            "appsecret": appsecret
-        }
-        
-        response = requests.get(url, params=params)
-        data = response.json()
-        
-        if data.get("errcode") == 0:
-            return data.get("access_token")
-        else:
-            raise Exception(f"Failed to get access token: {data.get('errmsg')}")
+        try:
+            appkey = os.environ.get("DINGDING_APP_KEY")
+            appsecret = os.environ.get("DINGDING_APP_SECRET")
+            
+            if not all([appkey, appsecret]):
+                raise ValueError("Missing DingTalk API credentials in environment variables")
+            
+            url = f"{self.base_url}/gettoken"
+            data = self._make_request(url, {
+                "appkey": appkey,
+                "appsecret": appsecret
+            })
+            
+            return data["access_token"]
+            
+        except Exception as e:
+            logger.error(f"Failed to get access token: {str(e)}")
+            raise
 
     def get_department_list(self, fetch_child: bool = True) -> str:
         """获取部门列表"""
         try:
             access_token = self.get_access_token()
             url = f"{self.base_url}/v1/department/list"
-            params = {
+            data = self._make_request(url, {
                 "access_token": access_token,
                 "fetch_child": fetch_child
-            }
+            })
             
-            response = requests.get(url, params=params)
-            data = response.json()
+            departments = data.get("department", [])
+            result = []
+            for dept in departments:
+                result.append(
+                    f"Department ID: {dept['id']}\n"
+                    f"Name: {dept['name']}\n"
+                    f"Parent ID: {dept.get('parentid', 'N/A')}\n"
+                    f"---"
+                )
+            return "\n".join(result) if result else "No departments found"
             
-            if data.get("errcode") == 0:
-                departments = data.get("department", [])
-                result = []
-                for dept in departments:
-                    result.append(
-                        f"Department ID: {dept['id']}\n"
-                        f"Name: {dept['name']}\n"
-                        f"Parent ID: {dept.get('parentid', 'N/A')}\n"
-                        f"---"
-                    )
-                return "\n".join(result)
-            else:
-                return f"Failed to get department list: {data.get('errmsg')}"
         except Exception as e:
+            logger.error(f"Failed to get department list: {str(e)}")
             return f"Error: {str(e)}"
 
     def get_department_users(self, department_id: int) -> str:
@@ -75,64 +101,87 @@ class DingdingMCPServer:
         try:
             access_token = self.get_access_token()
             url = f"{self.base_url}/v1/user/simplelist"
-            params = {
+            data = self._make_request(url, {
                 "access_token": access_token,
                 "department_id": department_id
-            }
+            })
             
-            response = requests.get(url, params=params)
-            data = response.json()
+            users = data.get("userlist", [])
+            result = []
+            for user in users:
+                result.append(
+                    f"User ID: {user['userid']}\n"
+                    f"Name: {user['name']}\n"
+                    f"---"
+                )
+            return "\n".join(result) if result else "No users found in this department"
             
-            if data.get("errcode") == 0:
-                users = data.get("userlist", [])
-                result = []
-                for user in users:
-                    result.append(
-                        f"User ID: {user['userid']}\n"
-                        f"Name: {user['name']}\n"
-                        f"---"
-                    )
-                return "\n".join(result) if result else "No users found in this department"
-            else:
-                return f"Failed to get department users: {data.get('errmsg')}"
         except Exception as e:
+            logger.error(f"Failed to get department users: {str(e)}")
             return f"Error: {str(e)}"
 
-    def get_user_detail(self, access_token, userid):
+    def get_user_detail(self, userid: str) -> Dict[str, Any]:
         """获取用户详细信息"""
-        url = f"{self.base_url}/v1/user/get"
-        params = {
-            "access_token": access_token,
-            "userid": userid
-        }
-        
-        response = requests.get(url, params=params)
-        return response.json()
+        try:
+            access_token = self.get_access_token()
+            url = f"{self.base_url}/v1/user/get"
+            return self._make_request(url, {
+                "access_token": access_token,
+                "userid": userid
+            })
+        except Exception as e:
+            logger.error(f"Failed to get user details: {str(e)}")
+            raise
 
     def search_user_by_name(self, name: str) -> str:
         """根据姓名搜索用户信息"""
         try:
-            access_token = self.get_access_token()
-            
             # 获取所有部门
-            dept_list = self.get_department_list(access_token)
-            if dept_list.get("errcode") != 0:
-                return f"Failed to get department list: {dept_list.get('errmsg')}"
+            dept_list_str = self.get_department_list()
+            if not dept_list_str or "Error" in dept_list_str:
+                return f"Failed to get department list: {dept_list_str}"
+            
+            # 解析部门列表字符串
+            departments = []
+            current_dept = {}
+            for line in dept_list_str.split('\n'):
+                if line.startswith('Department ID:'):
+                    if current_dept:
+                        departments.append(current_dept)
+                    current_dept = {'id': int(line.split(': ')[1])}
+                elif line.startswith('Name:'):
+                    current_dept['name'] = line.split(': ')[1]
+            if current_dept:
+                departments.append(current_dept)
             
             # 遍历所有部门查找用户
-            for dept in dept_list.get("department", []):
-                dept_id = dept["id"]
-                users = self.get_department_users(access_token, dept_id)
+            for dept in departments:
+                dept_id = dept['id']
+                users_str = self.get_department_users(dept_id)
                 
-                if users.get("errcode") != 0:
+                if "Error" in users_str or "Failed" in users_str:
+                    logger.warning(f"Failed to get users for department {dept_id}: {users_str}")
                     continue
                 
+                # 解析用户列表字符串
+                users = []
+                current_user = {}
+                for line in users_str.split('\n'):
+                    if line.startswith('User ID:'):
+                        if current_user:
+                            users.append(current_user)
+                        current_user = {'userid': line.split(': ')[1]}
+                    elif line.startswith('Name:'):
+                        current_user['name'] = line.split(': ')[1]
+                if current_user:
+                    users.append(current_user)
+                
                 # 在部门中查找匹配姓名的用户
-                for user in users.get("userlist", []):
-                    if user["name"] == name:
-                        # 获取用户详细信息
-                        user_detail = self.get_user_detail(access_token, user["userid"])
-                        if user_detail.get("errcode") == 0:
+                for user in users:
+                    if user['name'] == name:
+                        try:
+                            # 获取用户详细信息
+                            user_detail = self.get_user_detail(user['userid'])
                             return (f"Found user:\n"
                                    f"User ID: {user_detail['userid']}\n"
                                    f"Name: {user_detail['name']}\n"
@@ -140,10 +189,14 @@ class DingdingMCPServer:
                                    f"Email: {user_detail.get('email', 'N/A')}\n"
                                    f"Position: {user_detail.get('position', 'N/A')}\n"
                                    f"Department: {dept['name']}")
+                        except Exception as e:
+                            logger.error(f"Failed to get details for user {user['userid']}: {str(e)}")
+                            continue
             
             return f"No user found with name: {name}"
             
         except Exception as e:
+            logger.error(f"Error searching for user: {str(e)}")
             return f"Error: {str(e)}"
 
 async def main():
@@ -152,11 +205,11 @@ async def main():
     try:
         # 创建服务器实例
         server = DingdingMCPServer()
-        logger.info("Dingding MCP server 实例已创建")
+        logger.info("Dingding MCP server instance created")
         
         # 创建 MCP 服务器
         app = Server("dingding-mcp")
-        logger.info("MCP server 实例已创建")
+        logger.info("MCP server instance created")
         
         # 注册工具列表
         tools = [
@@ -248,10 +301,10 @@ async def main():
         
         # 设置工具列表
         app.tools = tools
-        logger.info("工具列表已注册")
+        logger.info("Tools registered")
         
         async with stdio_server() as (read_stream, write_stream):
-            logger.info("stdio server 已启动")
+            logger.info("stdio server started")
             try:
                 await app.run(
                     read_stream,
