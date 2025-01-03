@@ -27,6 +27,8 @@ class DingdingMCPServer:
         self.base_url = "https://oapi.dingtalk.com"
         self.access_token = None
         self._session = requests.Session()
+        self.app = Server("dingding-mcp")
+        self.setup_tools()
 
     def _make_request(self, url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """发送 HTTP 请求并处理通用错误"""
@@ -199,124 +201,139 @@ class DingdingMCPServer:
             logger.error(f"Error searching for user: {str(e)}")
             return f"Error: {str(e)}"
 
-async def main():
-    logger.info("Starting Dingding MCP server...")
-    
-    try:
-        # 创建服务器实例
-        server = DingdingMCPServer()
-        logger.info("Dingding MCP server instance created")
-        
-        # 创建 MCP 服务器
-        app = Server("dingding-mcp")
-        logger.info("MCP server instance created")
-        
-        # 注册工具列表
-        tools = [
-            Tool(
-                name="get_access_token",
-                description="""Retrieves an access token from the DingTalk API for authentication purposes.
-                Use this tool when you need to manually obtain an access token for testing or debugging.
-                Note: Most other tools automatically handle token management, so you rarely need to call this directly.
-                Returns: A valid access token string if successful, or an error message if failed.""",
-                function=server.get_access_token,
-                inputSchema={
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }
-            ),
-            Tool(
-                name="get_department_list",
-                description="""Retrieves a list of all departments in the organization.
-                Use this tool when you need to:
-                - Get an overview of the organization structure
-                - Find department IDs for other API calls
-                - Check the hierarchy of departments
-                - Verify if a specific department exists
-                The response includes department IDs, names, and parent department IDs.
-                Set fetch_child=false if you only need top-level departments.""",
-                function=server.get_department_list,
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "fetch_child": {
-                            "type": "boolean",
-                            "description": "Whether to include child departments in the response. Default is true.",
-                            "default": True
-                        }
-                    },
-                    "required": []
-                }
-            ),
-            Tool(
-                name="get_department_users",
-                description="""Retrieves a list of users in a specific department.
-                Use this tool when you need to:
-                - Get all members of a particular department
-                - Check if a user belongs to a department
-                - Find user IDs within a department
-                - List available users for task assignment
-                Requires a valid department ID (can be obtained from get_department_list).
-                Returns basic user information including user ID and name.""",
-                function=server.get_department_users,
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "department_id": {
-                            "type": "integer",
-                            "description": "The ID of the department to query. Must be a valid department ID from get_department_list."
-                        }
-                    },
-                    "required": ["department_id"]
-                }
-            ),
-            Tool(
-                name="search_user_by_name",
-                description="""Searches for a user across all departments by their name.
-                Use this tool when you need to:
-                - Find detailed information about a specific user
-                - Verify if a user exists in the organization
-                - Get contact information for a user
-                - Check which department a user belongs to
-                This tool will search through all departments to find the user.
-                Returns comprehensive user details including:
-                - User ID and name
-                - Contact information (mobile and email)
-                - Position and department
-                Note: This operation may take longer as it searches through all departments.""",
-                function=server.search_user_by_name,
-                inputSchema={
-                    "type": "object",
-                    "properties": {
-                        "name": {
-                            "type": "string",
-                            "description": "The exact name of the user to search for. Must match the user's name in DingTalk exactly."
-                        }
-                    },
-                    "required": ["name"]
-                }
-            )
-        ]
-        
-        # 设置工具列表
-        app.tools = tools
-        logger.info("Tools registered")
+    def setup_tools(self):
+        @self.app.list_tools()
+        async def list_tools() -> List[Tool]:
+            return [
+                Tool(
+                    name="get_access_token",
+                    description="""Retrieves an access token from the DingTalk API for authentication purposes.
+                    Use this tool when you need to manually obtain an access token for testing or debugging.
+                    Note: Most other tools automatically handle token management, so you rarely need to call this directly.
+                    Returns: A valid access token string if successful, or an error message if failed.""",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                ),
+                Tool(
+                    name="get_department_list",
+                    description="""Retrieves a list of all departments in the organization.
+                    Use this tool when you need to:
+                    - Get an overview of the organization structure
+                    - Find department IDs for other API calls
+                    - Check the hierarchy of departments
+                    - Verify if a specific department exists
+                    The response includes department IDs, names, and parent department IDs.
+                    Set fetch_child=false if you only need top-level departments.""",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "fetch_child": {
+                                "type": "boolean",
+                                "description": "Whether to include child departments in the response. Default is true.",
+                                "default": True
+                            }
+                        },
+                        "required": []
+                    }
+                ),
+                Tool(
+                    name="get_department_users",
+                    description="""Retrieves a list of users in a specific department.
+                    Use this tool when you need to:
+                    - Get all members of a particular department
+                    - Check if a user belongs to a department
+                    - Find user IDs within a department
+                    - List available users for task assignment
+                    Requires a valid department ID (can be obtained from get_department_list).
+                    Returns basic user information including user ID and name.""",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "department_id": {
+                                "type": "integer",
+                                "description": "The ID of the department to query. Must be a valid department ID from get_department_list."
+                            }
+                        },
+                        "required": ["department_id"]
+                    }
+                ),
+                Tool(
+                    name="search_user_by_name",
+                    description="""Searches for a user across all departments by their name.
+                    Use this tool when you need to:
+                    - Find detailed information about a specific user
+                    - Verify if a user exists in the organization
+                    - Get contact information for a user
+                    - Check which department a user belongs to
+                    This tool will search through all departments to find the user.
+                    Returns comprehensive user details including:
+                    - User ID and name
+                    - Contact information (mobile and email)
+                    - Position and department
+                    Note: This operation may take longer as it searches through all departments.""",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "The exact name of the user to search for. Must match the user's name in DingTalk exactly."
+                            }
+                        },
+                        "required": ["name"]
+                    }
+                )
+            ]
+
+        @self.app.call_tool()
+        async def call_tool(name: str, arguments: dict) -> List[TextContent]:
+            try:
+                if name == "get_access_token":
+                    token = self.get_access_token()
+                    return [TextContent(type="text", text=f"Access Token: {token}")]
+                
+                elif name == "get_department_list":
+                    fetch_child = arguments.get("fetch_child", True)
+                    result = self.get_department_list(fetch_child)
+                    return [TextContent(type="text", text=result)]
+                
+                elif name == "get_department_users":
+                    department_id = arguments["department_id"]
+                    result = self.get_department_users(department_id)
+                    return [TextContent(type="text", text=result)]
+                
+                elif name == "search_user_by_name":
+                    name = arguments["name"]
+                    result = self.search_user_by_name(name)
+                    return [TextContent(type="text", text=result)]
+                
+                else:
+                    return [TextContent(type="text", text=f"Unknown tool: {name}")]
+                    
+            except Exception as e:
+                logger.error(f"Error executing tool {name}: {str(e)}")
+                return [TextContent(type="text", text=f"Error: {str(e)}")]
+
+    async def run(self):
+        logger.info("Starting Dingding MCP server...")
         
         async with stdio_server() as (read_stream, write_stream):
             logger.info("stdio server started")
             try:
-                await app.run(
+                await self.app.run(
                     read_stream,
                     write_stream,
-                    app.create_initialization_options()
+                    self.app.create_initialization_options()
                 )
             except Exception as e:
                 logger.error(f"Server run error: {str(e)}", exc_info=True)
                 raise
-    except Exception as e:
-        logger.error(f"Server initialization error: {str(e)}", exc_info=True)
-        raise
+
+def main():
+    server = DingdingMCPServer()
+    asyncio.run(server.run())
 
 if __name__ == "__main__":
     try:
