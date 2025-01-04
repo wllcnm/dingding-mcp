@@ -5,8 +5,9 @@ import sys
 from typing import List, Optional, Dict, Any
 import requests
 from mcp.server import Server
-from mcp.types import Tool, TextContent
+from mcp.types import Tool, TextContent, Prompt, PromptMessage, GetPromptResult
 from mcp.server.stdio import stdio_server
+from mcp.server.models import InitializationOptions
 
 # 设置日志级别为 DEBUG，显示更多信息
 logging.basicConfig(
@@ -31,6 +32,7 @@ class DingdingMCPServer:
         self.app = Server("dingding-mcp")
         logger.debug("Created MCP Server instance with name: dingding-mcp")
         self.setup_tools()
+        self.setup_prompts()
         logger.debug("Server initialization completed")
 
     def _make_request(self, url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -216,67 +218,65 @@ class DingdingMCPServer:
     def setup_tools(self):
         logger.debug("Setting up MCP tools...")
         
-        @self.app.list_tools()
+        tools = [
+            Tool(
+                name="get_access_token",
+                description="Retrieves an access token from the DingTalk API for authentication purposes.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            ),
+            Tool(
+                name="get_department_list",
+                description="Retrieves a list of all departments in the organization.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "fetch_child": {
+                            "type": "boolean",
+                            "description": "Whether to include child departments in the response. Default is true.",
+                            "default": True
+                        }
+                    },
+                    "required": []
+                }
+            ),
+            Tool(
+                name="get_department_users",
+                description="Retrieves a list of users in a specific department.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "department_id": {
+                            "type": "integer",
+                            "description": "The ID of the department to query."
+                        }
+                    },
+                    "required": ["department_id"]
+                }
+            ),
+            Tool(
+                name="search_user_by_name",
+                description="Searches for a user across all departments by their name.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "The exact name of the user to search for."
+                        }
+                    },
+                    "required": ["name"]
+                }
+            )
+        ]
+        
         async def list_tools() -> List[Tool]:
             logger.debug("list_tools called")
-            tools = [
-                Tool(
-                    name="get_access_token",
-                    description="Retrieves an access token from the DingTalk API for authentication purposes.",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {},
-                        "required": []
-                    }
-                ),
-                Tool(
-                    name="get_department_list",
-                    description="Retrieves a list of all departments in the organization.",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "fetch_child": {
-                                "type": "boolean",
-                                "description": "Whether to include child departments in the response. Default is true.",
-                                "default": True
-                            }
-                        },
-                        "required": []
-                    }
-                ),
-                Tool(
-                    name="get_department_users",
-                    description="Retrieves a list of users in a specific department.",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "department_id": {
-                                "type": "integer",
-                                "description": "The ID of the department to query."
-                            }
-                        },
-                        "required": ["department_id"]
-                    }
-                ),
-                Tool(
-                    name="search_user_by_name",
-                    description="Searches for a user across all departments by their name.",
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "name": {
-                                "type": "string",
-                                "description": "The exact name of the user to search for."
-                            }
-                        },
-                        "required": ["name"]
-                    }
-                )
-            ]
-            logger.debug(f"Returning {len(tools)} tools")
             return tools
-
-        @self.app.call_tool()
+        
         async def call_tool(name: str, arguments: dict) -> List[TextContent]:
             logger.debug(f"Tool called: {name} with arguments: {arguments}")
             try:
@@ -313,6 +313,35 @@ class DingdingMCPServer:
             except Exception as e:
                 logger.error(f"Error executing tool {name}: {str(e)}", exc_info=True)
                 return [TextContent(type="text", text=f"Error: {str(e)}")]
+        
+        self.app.list_tools_handler = list_tools
+        self.app.call_tool_handler = call_tool
+
+    def setup_prompts(self):
+        """设置 Prompts 处理器"""
+        logger.debug("Setting up MCP prompts...")
+        
+        async def list_prompts() -> List[Prompt]:
+            logger.debug("list_prompts called")
+            return []
+        
+        async def get_prompt(name: str, arguments: Optional[Dict[str, str]] = None) -> GetPromptResult:
+            logger.debug(f"get_prompt called with name: {name}, arguments: {arguments}")
+            return GetPromptResult(
+                description="DingTalk MCP Prompt",
+                messages=[
+                    PromptMessage(
+                        role="system",
+                        content=TextContent(
+                            type="text",
+                            text="This is a DingTalk MCP service."
+                        )
+                    )
+                ]
+            )
+        
+        self.app.list_prompts_handler = list_prompts
+        self.app.get_prompt_handler = get_prompt
 
     async def run(self):
         logger.info("Starting Dingding MCP server...")
@@ -324,7 +353,11 @@ class DingdingMCPServer:
                 await self.app.run(
                     read_stream,
                     write_stream,
-                    self.app.create_initialization_options()
+                    InitializationOptions(
+                        server_name="dingding-mcp",
+                        server_version="0.1.0",
+                        capabilities=self.app.get_capabilities()
+                    )
                 )
             except Exception as e:
                 logger.error(f"Server error: {str(e)}", exc_info=True)
